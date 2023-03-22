@@ -309,6 +309,13 @@ def test_grouped_bounded_expanding_window(
             lambda t, win: t.double_col.mean().over(win),
             lambda df: (df.double_col.expanding().mean()),
             id='mean',
+            # marks=[
+            #     pytest.mark.broken(
+            #         ["dask"],
+            #         reason="FIXME Dask complains about non-unique index. Unable to reproduce outside of this test.",
+            #     ),
+            # ],
+            marks=[pytest.mark.notimpl(["dask"], raises=NotImplementedError)],
         ),
         param(
             # Disabled on PySpark and Spark backends becuase in pyspark<3.0.0,
@@ -331,14 +338,14 @@ def test_grouped_bounded_expanding_window(
                         "trino",
                     ],
                     raises=com.OperationNotDefinedError,
-                )
+                ),
+                pytest.mark.broken(["dask"], raises=ValueError),
             ],
         ),
     ],
 )
 # Some backends do not support non-grouped window specs
 @pytest.mark.notimpl(["datafusion", "polars"], raises=com.OperationNotDefinedError)
-@pytest.mark.notimpl(["dask"], raises=NotImplementedError)
 def test_ungrouped_bounded_expanding_window(
     backend, alltypes, df, result_fn, expected_fn
 ):
@@ -483,7 +490,6 @@ def test_grouped_bounded_preceding_window(backend, alltypes, df, window_fn):
                     ],
                     raises=com.OperationNotDefinedError,
                 ),
-                pytest.mark.notimpl(["dask"], raises=NotImplementedError),
             ],
         ),
     ],
@@ -526,7 +532,6 @@ def test_grouped_unbounded_window(
     expected = expected.set_index('id').sort_index()
 
     left, right = result.val, expected.val
-
     backend.assert_series_equal(left, right)
 
 
@@ -539,9 +544,8 @@ def test_grouped_unbounded_window(
     ],
 )
 @pytest.mark.broken(["snowflake"], raises=AssertionError)
-@pytest.mark.broken(["pandas", "mssql"], raises=AssertionError)
+@pytest.mark.broken(["dask", "pandas", "mssql"], raises=AssertionError)
 @pytest.mark.notimpl(["datafusion", "polars"], raises=com.OperationNotDefinedError)
-@pytest.mark.notimpl(["dask"], raises=NotImplementedError)
 def test_simple_ungrouped_unbound_following_window(
     backend, alltypes, ibis_method, pandas_fn
 ):
@@ -552,7 +556,6 @@ def test_simple_ungrouped_unbound_following_window(
     expr = ibis_method(t.double_col).over(w).name('double_col')
     result = expr.execute()
     expected = pandas_fn(df.double_col[::-1])[::-1]
-
     backend.assert_series_equal(result, expected)
 
 
@@ -607,10 +610,10 @@ def test_simple_ungrouped_unbound_following_window(
                     raises=com.OperationNotDefinedError,
                 ),
                 pytest.mark.broken(["pandas"], raises=AssertionError),
-                pytest.mark.notimpl(
+                pytest.mark.broken(
                     ["dask"],
-                    raises=NotImplementedError,
-                    reason='Window operations are unsupported in the dask backend',
+                    raises=ValueError,
+                    reason="Dask windowing order_by not yet implemented",
                 ),
             ],
         ),
@@ -643,9 +646,6 @@ def test_simple_ungrouped_unbound_following_window(
             lambda df: df.float_col.shift(1),
             True,
             id='ordered-lag',
-            marks=[
-                pytest.mark.notimpl(["dask"], raises=NotImplementedError),
-            ],
         ),
         param(
             lambda t, win: t.float_col.lag().over(win),
@@ -658,7 +658,6 @@ def test_simple_ungrouped_unbound_following_window(
                     reason="this isn't actually broken: the backend result is equal up to ordering",
                     raises=AssertionError,
                 ),
-                pytest.mark.notimpl(["dask"], raises=com.OperationNotDefinedError),
                 pytest.mark.notimpl(
                     ["pyspark"],
                     raises=AnalysisException,
@@ -679,7 +678,6 @@ def test_simple_ungrouped_unbound_following_window(
             id='ordered-lead',
             marks=[
                 pytest.mark.notimpl(["clickhouse"], raises=AssertionError),
-                pytest.mark.notimpl(["dask"], raises=NotImplementedError),
             ],
         ),
         param(
@@ -696,7 +694,6 @@ def test_simple_ungrouped_unbound_following_window(
                     ),
                     raises=AssertionError,
                 ),
-                pytest.mark.notimpl(["dask"], raises=com.OperationNotDefinedError),
                 pytest.mark.notimpl(
                     ["pyspark"],
                     raises=AnalysisException,
@@ -732,11 +729,15 @@ def test_simple_ungrouped_unbound_following_window(
                     ],
                     raises=com.OperationNotDefinedError,
                 ),
-                pytest.mark.notimpl(["dask"], raises=NotImplementedError),
                 pytest.mark.notimpl(
                     ["pandas"],
                     raises=RuntimeWarning,
                     reason='invalid value encountered in divide',
+                ),
+                pytest.mark.broken(
+                    ["dask"],
+                    raises=ValueError,
+                    reason="Dask windowing order_by not yet implemented",
                 ),
             ],
         ),
@@ -919,7 +920,6 @@ def test_grouped_ordered_window_coalesce(backend, alltypes, df):
 
 
 @pytest.mark.notimpl(["datafusion", "polars"], raises=com.OperationNotDefinedError)
-@pytest.mark.notimpl(["dask"], raises=NotImplementedError)
 @pytest.mark.broken(
     ["clickhouse"], reason="clickhouse returns incorrect results", raises=AssertionError
 )
