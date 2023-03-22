@@ -1,22 +1,20 @@
 import pytest
+from dask.dataframe.utils import tm
 
 import ibis
 import ibis.common.exceptions as com
 import ibis.expr.operations as ops
 from ibis.backends.base.df.scope import Scope
-from ibis.backends.pandas.dispatch import execute_node as pandas_execute_node
-
-dd = pytest.importorskip("dask.dataframe")
-
-from dask.dataframe.utils import tm  # noqa: E402
-
-from ibis.backends.dask import Backend  # noqa: E402
-from ibis.backends.dask.core import execute  # noqa: E402
-from ibis.backends.dask.dispatch import (  # noqa: E402
+from ibis.backends.dask import Backend
+from ibis.backends.dask.core import execute
+from ibis.backends.dask.dispatch import (
     execute_node,
     post_execute,
     pre_execute,
 )
+from ibis.backends.pandas.dispatch import execute_node as pandas_execute_node
+
+dd = pytest.importorskip("dask.dataframe")
 
 
 def test_from_dataframe(dataframe, ibis_table, core_client):

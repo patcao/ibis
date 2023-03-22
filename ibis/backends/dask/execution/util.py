@@ -8,16 +8,15 @@ import numpy as np
 import pandas as pd
 from dask.dataframe.groupby import SeriesGroupBy
 
-import ibis.backends.pandas.execution.util as pd_util
 import ibis.expr.analysis as an
 import ibis.expr.operations as ops
-import ibis.expr.types as ir
 import ibis.util
 from ibis.backends.base.df.scope import Scope
 from ibis.backends.base.df.timecontext import TimeContext
 from ibis.backends.dask.core import execute
 from ibis.backends.pandas.trace import TraceTwoLevelDispatcher
 from ibis.common import graph
+from ibis.expr.operations.sortkeys import SortKey
 
 DispatchRule = Tuple[Tuple[Union[Type, Tuple], ...], Callable]
 
@@ -147,7 +146,8 @@ def coerce_to_output(
         )
         return series
 
-    return dd.from_pandas(pd_util.coerce_to_output(result, node, index), npartitions=1)
+    # Wrap `result` in a single-element Series.
+    return dd.from_pandas(pd.Series([result], name=result_name), npartitions=1)
 
 
 @dask.delayed
@@ -200,9 +200,9 @@ def safe_concat(dfs: list[dd.Series | dd.DataFrame]) -> dd.DataFrame:
 
 
 def compute_sort_key(
-    key: ops.SortKey,
+    key: str | SortKey,
     data: dd.DataFrame,
-    timecontext: TimeContext | None = None,
+    timecontext: TimeContext,
     scope: Scope = None,
     **kwargs,
 ):
@@ -218,6 +218,8 @@ def compute_sort_key(
     name = ibis.util.guid()
     if key.name in data:
         return name, data[key.name]
+    if isinstance(key, str):
+        return key, None
     else:
         if scope is None:
             scope = Scope()
@@ -231,16 +233,47 @@ def compute_sort_key(
 
 def compute_sorted_frame(
     df: dd.DataFrame,
-    order_by: ir.Value,
-    timecontext: TimeContext | None = None,
+    order_by: list[str | SortKey],
+    group_by: list[str | SortKey] = None,
+    timecontext=None,
     **kwargs,
-) -> dd.DataFrame:
-    sort_col_name, temporary_column = compute_sort_key(
-        order_by, df, timecontext, **kwargs
+) -> dd.DtaFrame:
+    sort_keys = []
+    ascending = []
+
+    if group_by is None:
+        group_by = []
+
+    for value in group_by:
+        sort_keys.append(value)
+        ascending.append(True)
+
+    for key in order_by:
+        sort_keys.append(key)
+        ascending.append(key.ascending)
+
+    new_columns = {}
+    computed_sort_keys = []
+    for key in sort_keys:
+        computed_sort_key, temporary_column = compute_sort_key(
+            key, df, timecontext, **kwargs
+        )
+        computed_sort_keys.append(computed_sort_key)
+        if temporary_column is not None:
+            new_columns[computed_sort_key] = temporary_column
+
+    result = df.assign(**new_columns)
+    result = result.sort_values(
+        computed_sort_keys, ascending=ascending, kind='mergesort'
     )
-    result = df.assign(**{sort_col_name: temporary_column})
-    result = result.set_index(sort_col_name).reset_index(drop=True)
-    return result
+    # TODO: we'll eventually need to return this frame with the temporary
+    # columns and drop them in the caller (maybe using post_execute?)
+    ngrouping_keys = len(group_by)
+    return (
+        result,
+        computed_sort_keys[:ngrouping_keys],
+        computed_sort_keys[ngrouping_keys:],
+    )
 
 
 def assert_identical_grouping_keys(*args):
@@ -355,6 +388,56 @@ def add_partitioned_sorted_column(
     return df
 
 
+def add_globally_consecutive_column(
+    df: dd.DataFrame | dd.Series,
+    col_name: str = '_ibis_index',
+    set_as_index: bool = True,
+) -> dd.DataFrame:
+    """Add a column that is globally consecutive across the distributed data.
+
+    By construction, this column is already sorted and can be used to partition
+    the data.
+    This column can act as if we had a global index across the distributed data.
+    This index needs to be consecutive in the range of [0, len(df)), allows
+    downstream operations to work properly.
+    The default index of dask dataframes is to be consecutive within each partition.
+
+    Important properties:
+
+    - Each row has a unique id (i.e. a value in this column)
+    - The global index that's added is consecutive in the same order that the rows currently are in.
+    - IDs within each partition are already sorted
+
+    We also do not explicity deal with overflow in the bounds.
+
+    Parameters
+    ----------
+    df : dd.DataFrame
+        Dataframe to add the column to
+    col_name: str
+        Name of the column to use. Default is _ibis_index
+    set_as_index: bool
+        If True, will set the consecutive column as the index. Default is True.
+
+    Returns
+    -------
+    dd.DataFrame
+        New dask dataframe with sorted partitioned index
+    """
+    if isinstance(df, dd.Series):
+        df = df.to_frame()
+
+    if col_name in df.columns:
+        raise ValueError(f"Column {col_name} is already present in DataFrame")
+
+    df = df.assign(**{col_name: 1})
+    df = df.assign(**{col_name: df[col_name].cumsum() - 1})
+    if set_as_index:
+        df = df.reset_index(drop=True)
+        df = df.set_index(col_name, sorted=True)
+    return df
+
+
 def is_row_order_preserving(nodes) -> bool:
     """Detects if the operation preserves row ordering.
 
@@ -371,3 +454,10 @@ def is_row_order_preserving(nodes) -> bool:
             return (graph.proceed, True)
 
     return graph.traverse(_is_row_order_preserving, nodes)
+
+
+def rename_index(df: dd.DataFrame, new_index_name: str) -> dd.DataFrame:
+    # No elegant way to rename index
+    # https://github.com/dask/dask/issues/4950
+    df = df.map_partitions(pd.DataFrame.rename_axis, new_index_name, axis='index')
+    return df

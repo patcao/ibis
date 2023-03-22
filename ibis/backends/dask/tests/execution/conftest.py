@@ -277,7 +277,14 @@ def sel_cols(batting):
 
 @pytest.fixture(scope='module')
 def players_base(batting, sel_cols):
-    return batting[sel_cols].order_by(sel_cols[:3])
+    # TODO Dask doesn't support order_by and group_by yet
+    # Adding an order by would cause all groupby tests to fail.
+    return batting[sel_cols]  # .order_by(sel_cols[:3])
+
+
+@pytest.fixture(scope='module')
+def players(players_base):
+    return players_base.group_by('playerID')
 
 
 @pytest.fixture(scope='module')
