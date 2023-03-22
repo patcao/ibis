@@ -22,6 +22,8 @@ from ibis.backends.dask.dispatch import (  # noqa: E402
     pre_execute,
 )
 
+dd = pytest.importorskip("dask.dataframe")
+
 
 @pytest.mark.parametrize('func', [execute_node, pre_execute, post_execute])
 def test_no_execute_ambiguities(func):

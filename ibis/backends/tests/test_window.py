@@ -265,6 +265,13 @@ def test_grouped_bounded_expanding_window(
             lambda t, win: t.double_col.mean().over(win),
             lambda df: (df.double_col.expanding().mean()),
             id='mean',
+            # marks=[
+            #     pytest.mark.broken(
+            #         ["dask"],
+            #         reason="FIXME Dask complains about non-unique index. Unable to reproduce outside of this test.",
+            #     ),
+            # ],
+            marks=[pytest.mark.notimpl(["dask"], raises=NotImplementedError)],
         ),
         param(
             # Disabled on PySpark and Spark backends becuase in pyspark<3.0.0,
@@ -288,7 +295,7 @@ def test_grouped_bounded_expanding_window(
     ],
 )
 # Some backends do not support non-grouped window specs
-@pytest.mark.notimpl(["dask", "datafusion"])
+@pytest.mark.notimpl(["datafusion"])
 def test_ungrouped_bounded_expanding_window(
     backend, alltypes, df, result_fn, expected_fn
 ):
@@ -402,7 +409,6 @@ def test_grouped_bounded_preceding_window(backend, alltypes, df, window_fn):
             marks=pytest.mark.notimpl(
                 [
                     "clickhouse",
-                    "dask",
                     "duckdb",
                     "impala",
                     "mysql",
@@ -449,7 +455,6 @@ def test_grouped_unbounded_window(
     expected = expected.set_index('id').sort_index()
 
     left, right = result.val, expected.val
-
     backend.assert_series_equal(left, right)
 
 
@@ -515,21 +520,22 @@ def test_grouped_unbounded_window(
             lambda df: df.float_col.shift(1),
             True,
             id='ordered-lag',
-            marks=pytest.mark.notimpl(["dask"]),
         ),
         param(
             lambda t, win: t.float_col.lag().over(win),
             lambda df: df.float_col.shift(1),
             False,
             id='unordered-lag',
-            marks=pytest.mark.notimpl(["dask", "mysql", "pyspark"]),
+            marks=pytest.mark.notimpl(["mysql", "pyspark"]),
         ),
         param(
             lambda t, win: t.float_col.lead().over(win),
             lambda df: df.float_col.shift(-1),
             True,
             id='ordered-lead',
-            marks=pytest.mark.notimpl(["clickhouse", "dask"]),
+            marks=[
+                pytest.mark.notimpl(["clickhouse"], raises=AssertionError),
+            ],
         ),
         param(
             lambda t, win: t.float_col.lead().over(win),
@@ -537,7 +543,7 @@ def test_grouped_unbounded_window(
             False,
             id='unordered-lead',
             marks=pytest.mark.notimpl(
-                ["clickhouse", "dask", "mysql", "pyspark"]
+                ["clickhouse", "mysql", "pyspark"]
             ),
         ),
         param(

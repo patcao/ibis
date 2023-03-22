@@ -17,14 +17,17 @@ import ibis.common.exceptions as com
 import ibis.expr.datatypes as dt
 import ibis.expr.operations as ops
 import ibis.expr.types as ir
+import ibis.util
 from ibis.backends.dask import Backend as DaskBackend
 from ibis.backends.dask.client import DaskTable
 from ibis.backends.dask.core import execute
 from ibis.backends.dask.dispatch import execute_node
 from ibis.backends.dask.execution.util import (
     TypeRegistrationDict,
+    add_globally_consecutive_column,
     make_selected_obj,
     register_types_to_dispatcher,
+    rename_index,
 )
 from ibis.backends.pandas.core import (
     date_types,
@@ -36,6 +39,8 @@ from ibis.backends.pandas.core import (
 from ibis.backends.pandas.execution import constants
 from ibis.backends.pandas.execution.generic import (
     _execute_binary_op_impl,
+    coalesce,
+    compute_row_reduction,
     execute_between,
     execute_cast_series_array,
     execute_cast_series_generic,
@@ -293,7 +298,11 @@ def execute_cast_series_date(op, data, type, **kwargs):
 @execute_node.register(ops.Limit, dd.DataFrame, integer_types, integer_types)
 def execute_limit_frame(op, data, nrows, offset, **kwargs):
     # NOTE: Dask Dataframes do not support iloc row based indexing
-    return data.loc[offset : (offset + nrows) - 1]
+    # Need to add a globally consecutive index in order to select nrows number of rows
+    unique_col_name = ibis.util.guid()
+    df = add_globally_consecutive_column(data, col_name=unique_col_name)
+    ret = df.loc[offset : (offset + nrows) - 1]
+    return rename_index(ret, None)
 
 
 @execute_node.register(ops.Not, (dd.core.Scalar, dd.Series))
@@ -465,3 +474,29 @@ def execute_simple_case_series(op, value, whens, thens, otherwise, **kwargs):
         otherwise = np.nan
     raw = np.select([value == when for when in whens], thens, otherwise)
     return wrap_case_result(raw, op.to_expr())
+
+
+@execute_node.register(ops.Greatest, tuple)
+def execute_node_greatest_list(op, values, **kwargs):
+    values = [execute(arg, **kwargs) for arg in values]
+    return compute_row_reduction(np.maximum.reduce, values, axis=0)
+
+
+@execute_node.register(ops.Least, tuple)
+def execute_node_least_list(op, values, **kwargs):
+    values = [execute(arg, **kwargs) for arg in values]
+    return compute_row_reduction(np.minimum.reduce, values, axis=0)
+
+
+@execute_node.register(ops.Coalesce, tuple)
+def execute_node_coalesce(op, values, **kwargs):
+    # TODO: this is slow
+    values = [execute(arg, **kwargs) for arg in values]
+    return compute_row_reduction(coalesce, values)
+
+
+@execute_node.register(ops.TableArrayView, dd.DataFrame)
+def execute_table_array_view(op, _, **kwargs):
+    # Need to compute dataframe in order to squeeze into a scalar
+    ddf = execute(op.table)
+    return ddf.compute().squeeze()
