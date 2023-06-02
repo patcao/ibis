@@ -131,8 +131,12 @@ from ibis.backends.pandas.core import (
 from ibis.expr.scope import Scope
 from ibis.expr.timecontext import canonicalize_context
 from ibis.expr.typing import TimeContext
+import ibis.expr.window as win
 
 is_computable_input.register(dd.core.Scalar)(is_computable_input_arg)
+# @is_computable_input.register(win.Window)
+# def window_computable_input(arg):
+#     return False
 
 
 def execute_with_scope(

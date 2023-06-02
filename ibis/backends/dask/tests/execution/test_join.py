@@ -92,12 +92,18 @@ def test_cross_join_project_left_table(left, right, df1, df2):
 
 @join_type
 def test_join_with_multiple_predicates(how, left, right, df1, df2):
-    expr = left.join(right, [left.key == right.key, left.key2 == right.key3], how=how)[
-        left, right.key3, right.other_value
-    ]
+    expr = left.join(
+        right, [left.key == right.key, left.key2 == right.key3], how=how
+    )[left, right.key3, right.other_value]
     result = expr.execute()
     expected = (
-        dd.merge(df1, df2, how=how, left_on=['key', 'key2'], right_on=['key', 'key3'])
+        dd.merge(
+            df1,
+            df2,
+            how=how,
+            left_on=['key', 'key2'],
+            right_on=['key', 'key3'],
+        )
         .compute(scheduler='single-threaded')
         .reset_index(drop=True)
     )
@@ -112,10 +118,18 @@ def test_join_with_multiple_predicates_written_as_one(
     how, left, right, df1, df2
 ):
     predicate = (left.key == right.key) & (left.key2 == right.key3)
-    expr = left.join(right, predicate, how=how)[left, right.key3, right.other_value]
+    expr = left.join(right, predicate, how=how)[
+        left, right.key3, right.other_value
+    ]
     result = expr.execute()
     expected = (
-        dd.merge(df1, df2, how=how, left_on=['key', 'key2'], right_on=['key', 'key3'])
+        dd.merge(
+            df1,
+            df2,
+            how=how,
+            left_on=['key', 'key2'],
+            right_on=['key', 'key3'],
+        )
         .compute(scheduler='single-threaded')
         .reset_index(drop=True)
     )
@@ -308,7 +322,9 @@ def test_join_with_project_right_duplicate_column(client, how, left, df1, df3):
     )
 
 
-def test_join_with_window_function(players_base, players_df, batting, batting_df):
+def test_join_with_window_function(
+    players_base, players_df, batting, batting_df
+):
     players = players_base
 
     # this should be semi_join

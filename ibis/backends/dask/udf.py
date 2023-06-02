@@ -108,7 +108,6 @@ def pre_execute_analytic_and_reduction_udf(op, *clients, scope=None, **kwargs):
     # This is generally not recommened.
     @execute_node.register(type(op), *(itertools.repeat(dd.Series, nargs)))
     def execute_udaf_node_no_groupby(op, *args, aggcontext, **kwargs):
-
         # This function is in essence fully materializing the dd.Series and
         # passing that (now) pd.Series to aggctx. This materialization
         # happens at `.compute()` time, making this "lazy"
@@ -192,7 +191,7 @@ def pre_execute_analytic_and_reduction_udf(op, *clients, scope=None, **kwargs):
             # for every argument excluding the first (pandas performs
             # the iteration for the first argument) for each argument
             # that is a SeriesGroupBy.
-            iters = create_gens_from_args_groupby(*args[1:])
+            iters = create_gens_from_args_groupby(args[1:])
 
             # TODO: Unify calling convension here to be more like
             # window
@@ -225,14 +224,16 @@ def pre_execute_analytic_and_reduction_udf(op, *clients, scope=None, **kwargs):
                 )
                 meta_value = [dd.utils.make_meta(out_type)]
             else:
-                meta_index = pd.Index([], name=groupings[0])
+                meta_index = pandas.Index([], name=groupings[0])
                 meta_value = []
 
             return grouped_df.apply(
                 apply_wrapper,
                 func,
                 col_names,
-                meta=pandas.Series(meta_value, index=meta_index, dtype=out_type),
+                meta=pandas.Series(
+                    meta_value, index=meta_index, dtype=out_type
+                ),
             )
 
     @execute_node.register(

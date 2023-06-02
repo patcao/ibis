@@ -157,7 +157,9 @@ def execute_notany_series(op, data, aggcontext=None, **kwargs):
     return result
 
 
-@execute_node.register((ops.NotAny, ops.NotAll), dd.Series, (dd.Series, type(None)))
+@execute_node.register(
+    (ops.NotAny, ops.NotAll), dd.Series, (dd.Series, type(None))
+)
 def execute_notany_series(op, data, mask, aggcontext=None, **kwargs):
     if mask is not None:
         data = data.loc[mask]

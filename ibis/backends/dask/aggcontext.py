@@ -40,8 +40,7 @@ class Transform(PandasTransform):
     def agg(self, grouped_data, function, *args, **kwargs):
         res = super().agg(grouped_data, function, *args, **kwargs)
         index_name = res.index.name if res.index.name is not None else 'index'
-        res = res.reset_index().set_index(index_name).iloc[:, 0]
-        return res
+        return res.reset_index().set_index(index_name).iloc[:, 0]
 
 
 def dask_window_agg_built_in(
@@ -122,7 +121,9 @@ class Window(AggregationContext):
 
         # regroup if needed
         if group_by:
-            grouped_frame = indexed_by_ordering.groupby(group_by, group_keys=False)
+            grouped_frame = indexed_by_ordering.groupby(
+                group_by, group_keys=False
+            )
         else:
             grouped_frame = indexed_by_ordering
         grouped = grouped_frame[name]
@@ -140,7 +141,9 @@ class Window(AggregationContext):
             #     https://github.com/pandas-dev/pandas/issues/23002
             # To deal with this, we create a _placeholder column
             windowed_frame = self.construct_window(grouped_frame)
-            window_sizes = windowed_frame['_placeholder'].count().reset_index(drop=True)
+            window_sizes = (
+                windowed_frame['_placeholder'].count().reset_index(drop=True)
+            )
             mask = ~(window_sizes.isna())
             window_upper_indices = dd.Series(range(len(window_sizes))) + 1
             window_lower_indices = window_upper_indices - window_sizes
@@ -149,7 +152,9 @@ class Window(AggregationContext):
             # as an index to the Series, if present. Here We extract
             # time column from the parent Dataframe `frame`.
             if get_time_col() in frame:
-                result_index = construct_time_context_aware_series(obj, frame).index
+                result_index = construct_time_context_aware_series(
+                    obj, frame
+                ).index
             else:
                 result_index = obj.index
             result = window_agg_udf(
@@ -188,18 +193,23 @@ class Cumulative(Window):
     __slots__ = ()
 
     def __init__(self, window, *args, **kwargs):
-        super().__init__('rolling', *args, window=window, min_periods=1, **kwargs)
+        super().__init__(
+            'rolling', *args, window=window, min_periods=1, **kwargs
+        )
 
 
 class Moving(Window):
     __slots__ = ()
 
-    def __init__(self, start, max_lookback, *args, **kwargs):
-        start = compute_window_spec(start.output_dtype, start.value)
+    def __init__(self, preceding, max_lookback, *args, **kwargs):
+        from ibis.backends.pandas.core import timedelta_types
+
+        ibis_dtype = getattr(preceding, 'type', lambda: None)()
+        preceding = compute_window_spec(ibis_dtype, preceding)
 
         super().__init__(
             'rolling',
-            start,
+            preceding,
             *args,
             max_lookback=max_lookback,
             min_periods=1,

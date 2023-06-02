@@ -108,7 +108,8 @@ def execute_series_natural_log(op, data, **kwargs):
     ops.Quantile, (dd.Series, ddgb.SeriesGroupBy), numeric_types
 )
 def execute_series_quantile(op, data, quantile, aggcontext=None, **kwargs):
-    return data.quantile(q=quantile)
+    raise NotImplementedError("Quantile not implemented in Dask (Dask #9824)")
+    # return data.quantile(q=quantile)
 
 
 @execute_node.register(
@@ -121,7 +122,11 @@ def execute_series_quantile_group_by(op, data, quantile, *_, **kwargs):
 
 
 @execute_node.register(
-    ops.MultiQuantile, dd.Series, collections.abc.Sequence, type(None), type(None)
+    ops.MultiQuantile,
+    dd.Series,
+    collections.abc.Sequence,
+    type(None),
+    type(None),
 )
 def execute_series_quantile_sequence(_, data, quantile, **kwargs):
     return list(data.quantile(q=quantile))

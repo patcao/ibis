@@ -14,12 +14,15 @@ from multipledispatch import Dispatcher
 import ibis.expr.analysis as an
 import ibis.expr.operations as ops
 import ibis.expr.window as win
-from ibis.backends.base.df.scope import Scope
-from ibis.backends.base.df.timecontext import (
-    TimeContext,
-)
+from ibis.expr.scope import Scope
+from ibis.expr.typing import TimeContext
+
 from ibis.backends.dask import aggcontext as agg_ctx
-from ibis.backends.dask.core import compute_time_context, execute, execute_with_scope
+from ibis.backends.dask.core import (
+    compute_time_context,
+    execute,
+    execute_with_scope,
+)
 from ibis.backends.dask.dispatch import execute_node
 from ibis.backends.dask.execution.util import (
     _pandas_dtype_from_dd_scalar,
@@ -36,7 +39,9 @@ from ibis.backends.pandas.core import (
     timedelta_types,
     timestamp_types,
 )
-from ibis.backends.pandas.execution.window import _post_process_group_by_order_by
+from ibis.backends.pandas.execution.window import (
+    _post_process_group_by_order_by,
+)
 
 
 def _check_valid_window_frame(frame):
@@ -110,6 +115,7 @@ def get_aggcontext_window(
     # expand or roll.
     #
     # otherwise we're transforming
+    operand = operand.op()
     output_type = operand.output_dtype
 
     if not group_by and not order_by:
@@ -207,7 +213,9 @@ def _post_process_order_by(
         series = add_globally_consecutive_column(series)
         return series[0]
 
-    series_index_name = 'index' if series.index.name is None else series.index.name
+    series_index_name = (
+        'index' if series.index.name is None else series.index.name
+    )
     # Need to sort series back before returning.
     series = series.reset_index().set_index(series_index_name).iloc[:, 0]
 
@@ -241,8 +249,8 @@ def execute_window_op(
     **kwargs,
 ):
     # func, frame = op.func, op.frame
-    func = op.expr    
-    
+    func = op.expr
+
     adjusted_timecontext = None
     if timecontext:
         arg_timecontexts = compute_time_context(
@@ -254,7 +262,7 @@ def execute_window_op(
         # adjusted_timecontext in later execution phases
         adjusted_timecontext = arg_timecontexts[0]
 
-    root_table = an.find_first_base_table(op)
+    root_table = an.find_first_base_table(op.expr)
     root_data = execute(
         root_table,
         scope=scope,
@@ -265,8 +273,8 @@ def execute_window_op(
     )
 
     grouping_keys = [
-        key.name
-        if isinstance(key, ops.TableColumn)
+        key.op().name
+        if isinstance(key.op(), ops.TableColumn)
         else execute(
             key,
             scope=scope,
@@ -283,17 +291,23 @@ def execute_window_op(
 
     if window._group_by:
         if window._order_by:
-            raise NotImplementedError('Grouped and order windows not supported yet')
+            raise NotImplementedError(
+                'Grouped and order windows not supported yet'
+            )
             # TODO finish implementeing grouped/order windows.
         else:
-            if len(grouping_keys) == 1 and isinstance(grouping_keys[0], dd.Series):
+            if len(grouping_keys) == 1 and isinstance(
+                grouping_keys[0], dd.Series
+            ):
                 # Dask will raise an exception about not supporting multiple Series in group by key
                 # even if it is passed a length 1 list of Series.
                 # For this case we just make group_by_cols a single Series.
                 group_by_cols = grouping_keys[0]
             else:
                 group_by_cols = grouping_keys
-            source = root_data.groupby(group_by_cols, sort=False, group_keys=False)
+            source = root_data.groupby(
+                group_by_cols, sort=False, group_keys=False
+            )
     elif window._order_by:
         source, grouping_keys, ordering_keys = compute_sorted_frame(
             df=root_data,
@@ -309,7 +323,7 @@ def execute_window_op(
     # force an update regardless of time context
     new_scope = scope.merge_scopes(
         [
-            Scope({t: source}, adjusted_timecontext)
+            Scope({t.op(): source}, adjusted_timecontext)
             for t in an.find_immediate_parent_tables(func)
         ],
         overwrite=True,
@@ -332,8 +346,7 @@ def execute_window_op(
         clients=clients,
         **kwargs,
     )
-
-    result = _get_post_process_function(frame)(
+    result = _get_post_process_function(window)(
         result,
         root_data,
         ordering_keys,
@@ -368,7 +381,9 @@ def execute_window_op(
 def execute_series_cumulative_sum_min_max(op, data, **kwargs):
     typename = type(op).__name__
     method_name = (
-        re.match(r"^Cumulative([A-Za-z_][A-Za-z0-9_]*)$", typename).group(1).lower()
+        re.match(r"^Cumulative([A-Za-z_][A-Za-z0-9_]*)$", typename)
+        .group(1)
+        .lower()
     )
     method = getattr(data, f"cum{method_name}")
     return method()

@@ -289,7 +289,8 @@ def test_grouped_bounded_expanding_window(
                         "postgres",
                         "sqlite",
                     ]
-                )
+                ),
+                pytest.mark.broken(["dask"], raises=ValueError),
             ],
         ),
     ],
@@ -542,9 +543,7 @@ def test_grouped_unbounded_window(
             lambda df: df.float_col.shift(-1),
             False,
             id='unordered-lead',
-            marks=pytest.mark.notimpl(
-                ["clickhouse", "mysql", "pyspark"]
-            ),
+            marks=pytest.mark.notimpl(["clickhouse", "mysql", "pyspark"]),
         ),
         param(
             lambda t, win: calc_zscore(t.double_col).over(win),

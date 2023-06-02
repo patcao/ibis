@@ -23,14 +23,14 @@ from ibis.backends.dask.execution.util import (
 )
 from ibis.backends.pandas.execution.selection import (
     build_df_from_selection,
-    compute_projection,    
+    compute_projection,
     map_new_column_names_to_data,
     remap_overlapping_column_names,
 )
 from ibis.backends.pandas.execution.util import get_join_suffix_for_op
 from ibis.expr.scope import Scope
 from ibis.expr.typing import TimeContext
-
+from ibis.expr.rules import Shape
 
 # TODO(kszucs): deduplicate with pandas.compute_projection() since it is almost
 # an exact copy of that function
@@ -49,14 +49,16 @@ def compute_projection(
     """
     node = expr.op()
     if isinstance(node, ops.TableNode):
-        if node == parent.table:
+        if expr == parent.table:
             return data
 
-        assert isinstance(parent.table, ops.Join)
-        assert node == parent.table.left or node == parent.table.right
+        assert isinstance(parent.table.op(), ops.Join)
+        assert (
+            expr == parent.table.op().left or expr == parent.table.op().right
+        )
 
         mapping = remap_overlapping_column_names(
-            parent.table,
+            parent.table.op(),
             root_table=node,
             data_columns=frozenset(data.columns),
         )
@@ -65,7 +67,7 @@ def compute_projection(
         name = node.name
         assert name is not None, 'Value selection name is None'
 
-        if node.output_shape.is_scalar():
+        if node.output_shape is Shape.SCALAR:
             data_columns = frozenset(data.columns)
 
             if scope is None:
@@ -74,7 +76,7 @@ def compute_projection(
             scope = scope.merge_scopes(
                 Scope(
                     {
-                        t: map_new_column_names_to_data(
+                        t.op(): map_new_column_names_to_data(
                             remap_overlapping_column_names(
                                 parent.table, t, data_columns
                             ),
@@ -83,9 +85,9 @@ def compute_projection(
                     },
                     timecontext,
                 )
-                for t in an.find_immediate_parent_tables(node)
+                for t in an.find_immediate_parent_tables(expr)
             )
-            scalar = execute(node, scope=scope, **kwargs)
+            scalar = execute(expr, scope=scope, **kwargs)
             return data.assign(**{name: scalar})[name]
         else:
             if isinstance(node, ops.TableColumn):
@@ -103,7 +105,7 @@ def compute_projection(
             scope = scope.merge_scopes(
                 Scope(
                     {
-                        t: map_new_column_names_to_data(
+                        t.op(): map_new_column_names_to_data(
                             remap_overlapping_column_names(
                                 parent.table, t, data_columns
                             ),
@@ -112,14 +114,15 @@ def compute_projection(
                     },
                     timecontext,
                 )
-                for t in an.find_immediate_parent_tables(node)
+                for t in an.find_immediate_parent_tables(expr)
             )
-
-            result = execute(node, scope=scope, timecontext=timecontext, **kwargs)
-            return coerce_to_output(result, node, data.index)
+            result = execute(
+                expr, scope=scope, timecontext=timecontext, **kwargs
+            )
+            return coerce_to_output(result, expr, data.index)
     else:
         raise TypeError(node)
-    
+
 
 def build_df_from_projection(
     selection_exprs: List[ir.Expr],
@@ -150,7 +153,8 @@ def build_df_from_projection(
     # used in dd.concat to merge the pieces back together.
     partitioned_data = add_globally_consecutive_column(data)
     data_pieces = [
-        compute_projection(node, op, partitioned_data, **kwargs) for node in selections
+        compute_projection(expr, op, partitioned_data, **kwargs)
+        for expr in selection_exprs
     ]
     result = dd.concat(data_pieces, axis=1)
     # _ibis_index was added and used to concat data_pieces together.
@@ -214,12 +218,13 @@ def execute_selection_dataframe(
             timecontext=timecontext,
             **kwargs,
         )
-        result = add_globally_consecutive_column(result, col_name='_ibis_sort_index')
+        result = add_globally_consecutive_column(
+            result, col_name='_ibis_sort_index'
+        )
 
         return result
     else:
         grouping_keys = ordering_keys = ()
-
     # return early if we do not have any temporary grouping or ordering columns
     assert not grouping_keys, 'group by should never show up in Selection'
     if not ordering_keys:
@@ -229,11 +234,9 @@ def execute_selection_dataframe(
     temporary_columns = pandas.Index(
         concatv(grouping_keys, ordering_keys)
     ).difference(data.columns)
-
     # no reason to call drop if we don't need to
     if temporary_columns.empty:
         return result
-
     # drop every temporary column we created for ordering or grouping
     return result.drop(temporary_columns, axis=1)
 

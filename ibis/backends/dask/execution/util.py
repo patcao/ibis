@@ -19,8 +19,9 @@ from ibis.expr import lineage as lin
 from ibis.expr import types as ir
 from ibis.expr.scope import Scope
 from ibis.expr.typing import TimeContext
-from ibis.common import graph
-from ibis.expr.operations.sortkeys import SortKey
+
+# from ibis.common import graph
+from ibis.expr.types.sortkeys import SortExpr
 
 DispatchRule = Tuple[Tuple[Union[Type, Tuple], ...], Callable]
 
@@ -304,7 +305,7 @@ def safe_concat(dfs: List[Union[dd.Series, dd.DataFrame]]) -> dd.DataFrame:
 
 
 def compute_sort_key(
-    key: str | SortKey,
+    key: str | SortExpr,
     data: dd.DataFrame,
     timecontext: Optional[TimeContext] = None,
     scope: Scope = None,
@@ -328,7 +329,7 @@ def compute_sort_key(
         if scope is None:
             scope = Scope()
         scope = scope.merge_scopes(
-            Scope({t: data}, timecontext) for t in by.op().root_tables()
+            Scope({t.op(): data}, timecontext) for t in by.op().root_tables()
         )
         new_column = execute(by, scope=scope, **kwargs)
         new_column.name = name
@@ -337,8 +338,8 @@ def compute_sort_key(
 
 def compute_sorted_frame(
     df: dd.DataFrame,
-    order_by: list[str | SortKey],
-    group_by: list[str | SortKey] = None,
+    order_by: list[str | SortExpr],
+    group_by: list[str | SortExpr] = None,
     timecontext=None,
     **kwargs,
 ) -> dd.DataFrame:
@@ -349,10 +350,12 @@ def compute_sorted_frame(
         group_by = []
 
     for value in group_by:
+        value = value.op()
         sort_keys.append(value)
         ascending.append(True)
 
     for key in order_by:
+        key = key.op()
         sort_keys.append(key)
         ascending.append(key.ascending)
 
@@ -463,5 +466,7 @@ def is_row_order_preserving(exprs) -> bool:
 def rename_index(df: dd.DataFrame, new_index_name: str) -> dd.DataFrame:
     # No elegant way to rename index
     # https://github.com/dask/dask/issues/4950
-    df = df.map_partitions(pd.DataFrame.rename_axis, new_index_name, axis='index')
+    df = df.map_partitions(
+        pd.DataFrame.rename_axis, new_index_name, axis='index'
+    )
     return df
